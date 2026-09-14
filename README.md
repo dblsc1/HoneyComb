@@ -1,16 +1,43 @@
-# HoneyComb TimeManagement · v0.1
+<div align="center">
 
-把你的项目摊成一张蜂巢，中间那一格是正在走的表。
+# 🍯 HoneyComb
 
-![蜂巢](docs/screenshot-hive.png)
+**把你的项目摊成一张蜂巢，中间那一格是正在走的表。**
 
-| 正在计时 | 计时台 |
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![No build step](https://img.shields.io/badge/frontend-no%20build%20step-brightgreen)
+![Docker Compose](https://img.shields.io/badge/run-docker%20compose%20up-blue)
+![Python](https://img.shields.io/badge/api-FastAPI%20%2B%20MongoDB-informational)
+![Version](https://img.shields.io/badge/version-v0.1-lightgrey)
+
+![蜂巢](docs/hero-hive-dark.png)
+
+</div>
+
+---
+
+## 60 秒看懂这张图
+
+时间管理工具几乎都长成一条时间轴或一张表格。它们是**一维**的——看完就忘。
+
+蜂巢是**二维**的：每个项目占一格，位置本身带信息。
+
+| 你看到的 | 它在说什么 |
 |---|---|
-| ![计时中](docs/screenshot-timing.png) | ![计时台](docs/screenshot-ring.png) |
+| 一块颜色 | 一个分区（生活 / 工作 / 学习…），占圆周上一个扇区，扇区角度 ∝ 项目数 |
+| 离中心的远近 | 热度。最近完成得多的项目自动往里坐 |
+| 颜色的浓淡 | 同一件事：越靠内越浓 |
+| 正中那一格 | **正在走的表**。没在计时就是「空闲」 |
+| 飘向某一格的粒子 | 时间正在流进那个项目 |
+
+所以你不用读，扫一眼就知道：**这段时间我的注意力堆在哪个方向。**
+人记得住"那块地在西北角、颜色很深"，记不住列表里的第 17 行。
+
+> 上图是演示数据：10 个分区、40 个项目。跑 `python3 seed/seed_demo.py --big` 就能复现。
 
 ## 它是什么
 
-一个单人用的时间管理系统。两页：
+一个单人用的时间管理系统。一张蜂巢、一块表、一页回顾：
 
 - **任务**：所有项目排成蜂巢。每个分区占一个扇区，越靠近中心的格子热度越高、颜色越深。
   长按一格就开始给它计时，被按的那一格会像 macOS 收进程序坞那样被吸进中间的圆环。
@@ -54,6 +81,20 @@ HONEYCOMB_BIND=0.0.0.0:8800 docker compose up -d
 ⚠️ **v0.1 没有登录**。默认只绑回环地址（`127.0.0.1`），是单机自用的定位。
 要放到局域网或公网，请自己在前面加一层带认证的反向代理。
 
+## 长什么样
+
+| 正在计时 | 计时台 |
+|---|---|
+| ![计时中](docs/screenshot-timing.png) | ![计时台](docs/screenshot-ring.png) |
+
+| 点开一格 | 短按分区名 |
+|---|---|
+| ![展开卡](docs/screenshot-expanded.png) | ![分区规划](docs/screenshot-zoneplan.png) |
+
+亮色主题跟随系统：
+
+![亮色蜂巢](docs/screenshot-hive.png)
+
 ## 怎么用
 
 | 操作 | 结果 |
@@ -75,7 +116,7 @@ api/    FastAPI + MongoDB。事件流 + 投影，计时与任务的全部逻辑
 web/    零构建的前端：原生 JS，没有框架、没有打包器，改完刷新就生效
 nginx/  唯一入口：/table/ 蜂巢，/ring/ 计时台，/api/ 反代到后端
 seed/   演示数据脚本（纯标准库）
-docs/   架构说明
+docs/   架构说明 + 演示顺序（DEMO.md）
 ```
 
 前端不需要 node，不需要 npm install。所有文件都是浏览器直接能跑的。
@@ -85,6 +126,16 @@ docs/   架构说明
 v0.1 —— 第一版开源。蜂巢 + 计时台 + 每周回顾：甘特、收件箱、待办清单、AI 规划、
 优先级权重这些都不在这一版里。旧的「经典列表」视图 2026-09-14 整个删掉了，
 它独有的那几条写路径（分区改名/删分区、项目改名/换区/删项目）已经搬进分区规划面板。
+
+## 它不是什么
+
+诚实登记，免得你装完才发现：
+
+- **单人用**。没有多用户、没有权限、没有团队报表和发票。
+- **手动计时**。不监控窗口、不自动追踪（那是 ActivityWatch 的活）。
+- **没有移动端 App**。页面是响应式的，但没打包成 App。
+- **v0.1 没有登录层**，默认只绑 `127.0.0.1`。要暴露到公网请自己加一层认证。
+- 数据量非常大时"全部现算"的性能还没压测过。
 
 ## 许可
 
