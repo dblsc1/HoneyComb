@@ -408,6 +408,20 @@ body {
 .hex-cell.is-expanded .hex-add { width: 30px; height: 30px; font-size: 19px; }
 .hex-cell.is-expanded .hex-close { width: 32px; height: 32px; font-size: 20px; }
 
+/* 展开档的标题是改名入口：静置只给一条极淡的虚线底，hover 才实起来。
+   不放铅笔图标 —— 标题居中，右边挂个图标会把"居中"再破坏一次（× 已经为此
+   挪出文档流了）。 */
+.hex-title.is-editable { cursor: text; border-bottom: 1px dashed transparent; }
+.hex-title.is-editable:hover,
+.hex-title.is-editable:focus-visible {
+  border-bottom-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: none;
+}
+.hex-title .hex-rename {
+  width: 100%; text-align: center; font: inherit; font-size: inherit;
+  line-height: inherit; padding: 0 4px;
+}
+
 /* ── 标题行 + 右上角红色关闭 ×（人类：「打开的六边形右上角放一个 x 关闭用，红色」）── */
 .hex-head { display: contents; }                 /* 静置/悬停档：标题照旧独占，不引入新盒子 */
 .hex-cell.is-expanded .hex-head {

@@ -77,7 +77,47 @@
     input.addEventListener("blur", commit);
   }
 
+  // 展开卡的标题就是改名入口（人类 2026-09-14）。和任务改名同一套手感：
+  // 原地变输入框，Enter 提交、Esc 取消、失焦取消。**失焦是取消不是提交** ——
+  // 标题在卡片最上面，点卡片里任何别的东西都会失焦，按提交处理等于误改。
+  // 错误没处可挂（.hex-detail 在标题下面，不是标题的祖先），走顶部状态条。
+  function startProjectRename(h3) {
+    var cell = h3.closest(".hex-cell");
+    var pid = cell && cell.dataset.projectId;
+    if (!pid || h3.querySelector("input")) return;
+    var old = h3.textContent;
+    var input = document.createElement("input");
+    input.type = "text"; input.value = old; input.className = "hex-rename"; input.maxLength = 120;
+    h3.textContent = ""; h3.appendChild(input);
+    input.focus(); input.select();
+    var settled = false;
+    function restore() { settled = true; h3.textContent = old; }
+    input.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (settled) return;
+        var name = input.value.trim();
+        restore();
+        if (!name || name === old) return;
+        D.renameProject(pid, name).then(function (r) {
+          if (!r.ok) { App.setStatus("改名失败：" + (r.message || "")); return; }
+          App.setStatus("");
+          App.reloadExpanded();
+        });
+      } else if (ev.key === "Escape") { ev.preventDefault(); if (!settled) restore(); }
+    });
+    input.addEventListener("blur", function () { if (!settled) restore(); });
+  }
+
   function onClick(ev) {
+    // ⚠️ 展开那一下**不能顺便进改名**：点一个收起格子的标题时，hex-app 先把
+    // 这一格展开（并把这次 click 记进 state.handledClickAt），fillCell 紧接着
+    // 给标题挂上 data-hex-action="rename-project" —— 于是**同一个 click** 冒泡
+    // 到这里，正好撞上刚挂上去的属性，一点就直接变输入框。人类要的是"大视角下
+    // 再点一次标题"，不是"点开就开始改名"。（真机测出来的，纸面审不出来。）
+    var st = App.getState && App.getState();
+    if (st && st.handledClickAt === ev.timeStamp) return;
     var btn = ev.target.closest("[data-hex-action]");
     if (!btn || btn.tagName === "FORM") return;
     var action = btn.dataset.hexAction;
@@ -87,6 +127,9 @@
       var task = findTask(id);
       if (!task) return;
       D.toggleTaskDone(id, !task.done).then(function (r) { afterWrite(btn, r); });
+    } else if (action === "rename-project") {
+      ev.preventDefault();
+      startProjectRename(btn);
     } else if (action === "rename-task") {
       ev.preventDefault();
       startRename(btn);

@@ -408,6 +408,22 @@
     var titleEl = item.el.querySelector(".hex-title");
     if (titleEl) {
       titleEl.textContent = cell.project ? cell.project.name : (body ? "新建项目" : "（空）");
+      // 标题＝改名入口，但**只在展开档**（人类 2026-09-14：「六边形鼠标点击大视角
+      // 加一个改名入口，点击标题可以改名」）。收起时不能挂 data-hex-action ——
+      // 上面那条 click 委托见到它就 return 交给 hex-crud.js，于是整格点不开了。
+      var editable = !!(body && cell.project);
+      if (editable) {
+        titleEl.setAttribute("data-hex-action", "rename-project");
+        titleEl.setAttribute("role", "button");
+        titleEl.setAttribute("tabindex", "0");
+        titleEl.title = "点一下改名";
+      } else {
+        titleEl.removeAttribute("data-hex-action");
+        titleEl.removeAttribute("role");
+        titleEl.removeAttribute("tabindex");
+        titleEl.removeAttribute("title");
+      }
+      titleEl.classList.toggle("is-editable", editable);
     }
     var slot = item.el.querySelector(".hex-body");
     if (slot) slot.innerHTML = body;              // 常路：只换内容，FLIP 的反向缩放不受影响
