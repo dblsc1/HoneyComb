@@ -197,20 +197,33 @@
   function isNeighbor(a, b) { return axialDistance(a, b) === 1; }
 
   // 扇区：角度 ∝ 权重，首尾相接铺满 360°。
+  // ⚠️ 分界必须**先算边、再由边减出角宽**，不能各自算角宽再累加。
+  // 各自算再累加时 `start + sweep` 和下一个 `start` 是两条不同的浮点路径，
+  // 边界角上两个分区可以同时判真 —— 「射出去只碰到一个分区」那条不变式当场破。
+  // 权重从整数（项目数）变成小数（冷区补贴）之后真的撞上了：300° 上两个分区。
+  // 由边减出角宽后，边界处 (x - edges[k]) < (edges[k+1] - edges[k]) 两边是同一次
+  // 浮点运算，恒为假，重叠在数学上就不可能了。最后一条边钉死 360，末尾不留缝。
   function buildSectors(weights) {
     var total = weights.reduce(function (a, b) { return a + b; }, 0) || 1;
-    var acc = 0;
-    return weights.map(function (w) {
-      var sweep = 360 * w / total;
-      var sec = { start: acc, sweep: sweep, center: acc + sweep / 2 };
-      acc += sweep;
-      return sec;
+    var edges = [0], acc = 0;
+    weights.forEach(function (w) { acc += w; edges.push(360 * acc / total); });
+    edges[edges.length - 1] = 360;
+    return weights.map(function (_, i) {
+      return { start: edges[i], sweep: edges[i + 1] - edges[i],
+               center: edges[i] + (edges[i + 1] - edges[i]) / 2 };
     });
   }
 
+  // ⚠️ 不许写成 `((angle - start) % 360 + 360) % 360`：那个规范化往返会把值**改掉**。
+  // 实测 47.647058823529406 走一趟 +360 再 %360 就变成 47.64705882352939，
+  // 于是边界角上 a < sweep 由假变真，两个分区同时认领 300°（单测「射出去只碰到
+  // 一个分区」当场红）。这里只在真的越界时加/减一次 360，落在 [0,360) 的常路
+  // 一次浮点运算都不做，差值精确。
   function inSector(angle, sec) {
-    var a = ((angle - sec.start) % 360 + 360) % 360;
-    return a < sec.sweep;
+    var a = angle - sec.start;
+    if (a < 0) a += 360;
+    else if (a >= 360) a -= 360;
+    return a >= 0 && a < sec.sweep;
   }
 
   // 一圈圈往外发格子，直到每个分区都拿够。
@@ -627,6 +640,71 @@
     return +(DEPTH_MIX.max - d * (DEPTH_MIX.max - DEPTH_MIX.min)).toFixed(2);
   }
 
+  // ── 冷区权重补贴（2026-09-14，人类判：「给冷区（第二圈都排不上的）加一个权重补贴」）──
+  //
+  // 病灶：扇区角度 ∝ 项目数，项目少的分区扇区就窄；窄到一定程度，**内圈根本没有
+  // 一个格位中心落在它里面** —— 这不是"被热区抢走了"，是几何上就没有位置。
+  // 真机 10 区 / 40 项目：财务 3 个项目 ⇒ 扇区 27°，落在 243°–270°；
+  // 第 1 圈格位中心在 0/60/…/240/300（60° 一格），第 2 圈在 0/30/…/240/270（30° 一格）
+  // —— 243°–270° 这个半开区间一个都不含，于是财务的第一格只能等到第 3 圈
+  // （20° 一格，260° 落进来了），三个项目沿半径串成一根刺，最外那格孤零零挂在外面。
+  //
+  // 所以补贴必须加在**权重**上（＝扇区角度），不是加在挑格顺序上：
+  // 顺序再靠前，自己扇区里没有格位也一样领不到。（先做的顺序补贴版实测
+  // 前后完全一样，就是这个原因。）
+  //
+  // 补法：给"第 COLD_START_RING 圈以内一个格位中心都够不着"的分区一个**角度下限**
+  // ——够得着第 2 圈就行，也就是 slotWidthDeg(2) = 30°。长度 ≥ 30° 的半开区间
+  // 必然含一个 30 的倍数，所以这个下限是**够用且最小**的，不多占一度。
+  // 其余分区按项目数瓜分剩下的角度，比例关系不变。
+  //
+  // ⚠️ 要迭代：把一个分区撑宽会把后面所有分区的起始角推走，可能把原本够得着的
+  // 挤成够不着。所以反复算到集合稳定（最多 COLD_ROUNDS 轮）。
+  // ⚠️ 要有刹车：补贴总量超过 COLD_BUDGET 就整体放弃 —— 分区多到人人都要补时，
+  // "按项目数分角度"这条读图规则会被补成一锅平均，那还不如留着那根刺。
+  var COLD_START_RING = 2;
+  var COLD_ROUNDS = 6;
+  var COLD_BUDGET = 0.6;          // 补贴后的下限合计不许超过整圈的 60%
+
+  // 第 d 圈有没有格位中心落在这个扇区里（只看几何，不看谁占了）。
+  function sectorHasSlot(sec, d) {
+    var ring = hexRing(d);
+    for (var i = 0; i < ring.length; i++) {
+      if (inSector(ring[i].angleDeg, sec)) return true;
+    }
+    return false;
+  }
+  function reachesInner(sec) {
+    for (var d = 1; d <= COLD_START_RING; d++) if (sectorHasSlot(sec, d)) return true;
+    return false;
+  }
+
+  // 返回补贴后的权重（数组）。没有分区需要补贴时原样返回入参。
+  function subsidizeColdWeights(counts) {
+    var floorShare = slotWidthDeg(COLD_START_RING) / 360;   // 30/360
+    var weights = counts.slice();
+    var cold = counts.map(function () { return false; });
+    for (var round = 0; round < COLD_ROUNDS; round++) {
+      var secs = buildSectors(weights);
+      var changed = false;
+      for (var i = 0; i < secs.length; i++) {
+        if (!cold[i] && !reachesInner(secs[i])) { cold[i] = true; changed = true; }
+      }
+      if (!changed) break;
+      var coldN = cold.filter(Boolean).length;
+      if (coldN * floorShare > COLD_BUDGET) return counts;   // 刹车：补不起就不补
+      // 冷区各拿 floorShare，其余按项目数瓜分剩下的。
+      var rest = 1 - coldN * floorShare;
+      var restTotal = 0;
+      counts.forEach(function (c, k) { if (!cold[k]) restTotal += c; });
+      weights = counts.map(function (c, k) {
+        if (cold[k]) return floorShare;
+        return restTotal > 0 ? rest * c / restTotal : rest / Math.max(1, counts.length - coldN);
+      });
+    }
+    return cold.some(Boolean) ? weights : counts;
+  }
+
   function buildHoneycomb(tree, opts) {
     opts = opts || {};
     var heat = opts.heat || {};
@@ -669,7 +747,8 @@
     // （落点在 hex-app.js::bindBlankPress）。这里回到只按项目数分格。
     // Math.max(1, n)：一个项目都没有的分区也占一格，否则分区本身会消失。
     var counts = zones.map(function (z) { return Math.max(1, byZone[z.id].length); });
-    var sectors = buildSectors(counts);
+    // 扇区角度 ∝ 项目数；只有"内圈一个格位都够不着"的冷区拿一份角度下限补贴。
+    var sectors = buildSectors(subsidizeColdWeights(counts));
     // 分区热度 = 它名下项目的热度之和。热的先挑格 → 整体更靠近中心。
     var zoneHeat = zones.map(function (z) {
       return byZone[z.id].reduce(function (a, p) { return a + (heat[p.id] || 0); }, 0);
@@ -961,6 +1040,9 @@
     buildSectors: buildSectors,
     inSector: inSector,
     allocateSectorCells: allocateSectorCells,
+    subsidizeColdWeights: subsidizeColdWeights,
+    reachesInner: reachesInner,
+    COLD_START_RING: COLD_START_RING,
 
     parseHexColor: parseHexColor,
     isDefaultZoneColor: isDefaultZoneColor,
