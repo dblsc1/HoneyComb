@@ -208,10 +208,11 @@
   <script src="app.js"></script>
   <script src="crud.js"></script>
   <script src="review.js"></script>
-  <!-- 蜂巢行动分区，顺序不能换：hex-data.js / hex-ring.js 是纯逻辑；
+  <!-- 蜂巢行动分区，顺序不能换：hex-audit.js（审计流派生，hex-data.js 依赖它）/ hex-data.js / hex-ring.js 是纯逻辑；
        hex-borders.js（界线 SVG，只画不改状态）与 hex-timer.js（长按计时 + 聚焦灰度）
        在加载时就要拿到前两者；hex-app.js 建 DOM 并在 boot() 里给 hex-timer 注上下文；
        hex-crud.js 用 hex-app.js 暴露的 window.NexusTableHexApp。 -->
+  <script src="hex-audit.js"></script>
   <script src="hex-data.js"></script>
   <script src="hex-ring.js"></script>
   <script src="hex-borders.js"></script>
