@@ -86,11 +86,34 @@
 .zp-new button:disabled { opacity: .5; cursor: progress; }
 .zp-msg { flex: 1 1 100%; font-size: var(--fs-eyebrow); color: var(--ink-2); min-height: 1em; }
 
+.zp-msg.is-bad { color: var(--danger); }
+
+/* 分区/项目的写操作入口（2026-09-14 从经典列表搬进来）。按钮做小、做灰，
+   静置时不和数据抢注意力；表格那一列 hover 整行才亮起来。 */
+.zp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.zp-ops { flex: 0 0 auto; display: flex; gap: 6px; }
+.zp-mini {
+  min-height: 28px; padding: 0 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2);
+  font: inherit; font-size: var(--fs-eyebrow); line-height: 1; white-space: nowrap;
+}
+.zp-mini:hover { color: var(--ink); border-color: var(--ink-3); }
+.zp-mini.is-danger:hover { color: var(--danger); border-color: var(--danger); }
+.zp-table td.zp-ops { opacity: .35; transition: opacity var(--t-fast, .12s) ease; }
+.zp-table tr:hover td.zp-ops,
+.zp-table tr:focus-within td.zp-ops { opacity: 1; }
+.zp-inline {
+  width: 100%; min-width: 8em; min-height: 30px; padding: 0 8px; border-radius: 7px;
+  border: 1px solid var(--plan); background: var(--bg); color: var(--ink); font: inherit;
+}
+.hex-zone-plan h2 .zp-inline { font-size: var(--fs-h2); }
+
 /* 手机：底部抽屉，四格统计两两一排，两栏列表叠成一栏 */
 @media (max-width: 560px) {
   .hex-zone-plan { width: 100vw; max-height: 88vh; margin: auto 0 0; border-radius: 16px 16px 0 0; }
   .hex-zone-plan > * { padding-inline: 16px; }
   .zp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .zp-cols { grid-template-columns: 1fr; }
+  .zp-table td.zp-ops { opacity: 1; }   /* 触屏没有 hover，操作列常亮 */
 }
 @media (prefers-reduced-motion: reduce) { .hex-zone-plan[open] { animation: none; } }

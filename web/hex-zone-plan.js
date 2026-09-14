@@ -11,6 +11,12 @@
  *   4. 接下来做什么 / 最近做完了什么 —— 本分区的下一步（逾期、今天到期、权重）与最近完成
  * 外加一个动作：在本分区直接新建项目（和经典列表同一个 D.createProject）。
  *
+ * 2026-09-14：经典列表整个去掉（人类判「问题有点多，直接去掉，以后搁置不开发」），
+ * 它**独有**的那几条写路径搬进这块面板 —— 分区改名 / 删分区、项目改名 / 换分区 /
+ * 删项目。搬的是**入口**不是写路径：底下还是 data.js 那几个 planner CRUD 函数
+ * （renameZone / deleteZone / renameProject / moveProject / deleteProject），
+ * 一个新的请求面都不开，和 hex-crud.js 当初的判断一致。
+ *
  * **后端零改动**：数据全是蜂巢已经拿着的（tree / heat / todos / completions），
  * 只多拉一次 views/gantt（打开时拉，拿不到就那一栏写"读取失败"，其余照常）。
  * 热度口径与 hex-data.js::completionHeat 同一份：近期完成次数按 7 天半衰期加权。
@@ -119,7 +125,12 @@
         '<td class="zp-num">' + (dash || (m.ganttOk ? hm(r.d7) : "—")) + "</td>" +
         '<td class="zp-num">' + r.done7 + "</td>" +
         '<td class="zp-num">' + r.todos + "</td>" +
-        "<td>" + (dash || (m.ganttOk ? planCell(r, m.todayStr) : "—")) + "</td></tr>";
+        "<td>" + (dash || (m.ganttOk ? planCell(r, m.todayStr) : "—")) + "</td>" +
+        '<td class="zp-ops">' +
+          '<button type="button" class="zp-mini" data-zp-act="proj-rename">改名</button>' +
+          '<button type="button" class="zp-mini" data-zp-act="proj-move">换区</button>' +
+          '<button type="button" class="zp-mini is-danger" data-zp-act="proj-delete">删</button>' +
+        "</td></tr>";
     }).join("");
     var next = m.next.length ? m.next.map(function (t) {
       return "<li>" + (t.overdue ? '<span class="zp-chip is-late">逾期</span>' :
@@ -135,10 +146,15 @@
     };
     return '<form method="dialog" class="zp-head">' +
         '<span class="zp-dot" style="--zone-color:' + esc(z.color) + '"></span>' +
-        '<div><h2>' + esc(z.name) + "</h2>" +
+        '<div><h2 data-zp-zonename>' + esc(z.name) + "</h2>" +
         '<p class="zp-muted">' + m.rows.length + " 个项目 · 热度 <b>" + heatText(z.heat) + "</b> · " +
           // 热度为 0 的分区彼此并列，给名次是假精确
-          (z.heat > 0 ? "全场第 " + m.rank + " / " + m.zoneCount : "近期没有完成记录") + "</p></div>" +
+          (z.heat > 0 ? "全场第 " + m.rank + " / " + m.zoneCount : "近期没有完成记录") +
+          '<span class="zp-msg" data-zp-msg role="status"></span></p></div>' +
+        '<span class="zp-ops">' +
+          '<button type="button" class="zp-mini" data-zp-act="zone-rename">改名</button>' +
+          '<button type="button" class="zp-mini is-danger" data-zp-act="zone-delete">删除分区</button>' +
+        "</span>" +
         '<button class="zp-close" value="close" aria-label="关闭">×</button></form>' +
       '<div class="zp-tiles">' +
         tile("近 7 天投入", dash || (m.ganttOk ? hm(m.d7) : "读取失败")) +
@@ -149,6 +165,7 @@
       '<section><h3>项目 · 按热度 <span class="zp-muted">（越热越靠近蜂巢中心）</span></h3>' +
         (m.rows.length ? '<div class="zp-scroll"><table class="zp-table"><thead><tr>' +
           '<th></th><th>项目</th><th>热度</th><th>7 天投入</th><th>7 天完成</th><th>待办</th><th>排期</th>' +
+          '<th><span class="zp-sr">操作</span></th>' +
           "</tr></thead><tbody>" + rows + "</tbody></table></div>"
           : '<p class="zp-muted">这个分区还没有项目。</p>') +
         '<p class="zp-note">热度 = 近期完成次数按 ' + (ctx.halfLifeDays || 7) +
@@ -161,6 +178,118 @@
         '<button type="submit">新建项目</button><span class="zp-msg" role="status"></span></form>';
   }
 
+  // ── 分区/项目的写操作（2026-09-14 从经典列表搬进来）──────────────────
+  function zoneOf(zoneId) {
+    return ((ctx.state.hive && ctx.state.hive.zones) || []).filter(function (z) {
+      return z.id === zoneId;
+    })[0];
+  }
+  function headMsg(text, bad) {
+    var el = dlg && dlg.querySelector("[data-zp-msg]");
+    if (!el) return;
+    el.textContent = text ? " · " + text : "";
+    el.classList.toggle("is-bad", !!bad);
+  }
+  // 写成功就重拉全量再重画这块面板；失败**不重拉**，把原因留在标题行上。
+  function afterWrite(r) {
+    if (!r || !r.ok) { headMsg((r && r.message) || "写入失败", true); return; }
+    var zoneId = dlg.dataset.zoneId;
+    ctx.reload().then(function () { if (dlg.open) open(zoneId); });
+  }
+
+  // 原地把一个元素换成输入框：Enter 提交、Esc 取消、失焦提交 —— 与 hex-crud.js
+  // 的任务改名同一套手感，同一个动作不给两种肌肉记忆。
+  function inlineEdit(el, value, onCommit) {
+    if (!el || el.querySelector("input")) return;
+    var old = el.innerHTML;
+    var input = document.createElement("input");
+    input.type = "text"; input.value = value; input.className = "zp-inline"; input.maxLength = 80;
+    el.innerHTML = ""; el.appendChild(input);
+    input.focus(); input.select();
+    var settled = false;
+    function done() { settled = true; el.innerHTML = old; }
+    input.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();                       // 别让 Enter 冒到"点一行=展开项目"
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (settled) return;
+        var v = input.value.trim(); done();
+        if (v && v !== value) onCommit(v);
+      } else if (ev.key === "Escape") { ev.preventDefault(); if (!settled) done(); }
+    });
+    input.addEventListener("blur", function () { if (!settled) done(); });
+  }
+
+  // 换分区：原地长出一个 <select>，选中即写。候选就是蜂巢现有的分区。
+  function inlineMove(el, projectId, fromZoneId) {
+    if (!el || el.querySelector("select")) return;
+    var old = el.innerHTML;
+    var sel = document.createElement("select");
+    sel.className = "zp-inline";
+    ((ctx.state.hive && ctx.state.hive.zones) || []).forEach(function (z) {
+      var o = document.createElement("option");
+      o.value = z.id; o.textContent = z.name;
+      if (z.id === fromZoneId) o.selected = true;
+      sel.appendChild(o);
+    });
+    el.innerHTML = ""; el.appendChild(sel); sel.focus();
+    var settled = false;
+    function done() { settled = true; el.innerHTML = old; }
+    sel.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+      if (ev.key === "Escape") { ev.preventDefault(); if (!settled) done(); }
+    });
+    sel.addEventListener("change", function () {
+      if (settled) return;
+      var to = sel.value; done();
+      if (to && to !== fromZoneId) ctx.moveProject(projectId, to).then(afterWrite);
+    });
+    sel.addEventListener("blur", function () { if (!settled) done(); });
+  }
+
+  function onAct(btn) {
+    var act = btn.dataset.zpAct;
+    var zoneId = dlg.dataset.zoneId;
+    var row = btn.closest("[data-zp-open]");
+    var pid = row && row.dataset.zpOpen;
+
+    if (act === "zone-rename") {
+      var z = zoneOf(zoneId);
+      inlineEdit(dlg.querySelector("[data-zp-zonename]"), z ? z.name : "", function (name) {
+        ctx.renameZone(zoneId, name).then(afterWrite);
+      });
+      return;
+    }
+    if (act === "zone-delete") {
+      // 先拦住"删掉一个还装着项目的分区"：后端会拒，但让人在点之前就知道为什么，
+      // 比看一行英文错误强。
+      var used = ((ctx.state.tree && ctx.state.tree.projects) || []).filter(function (p) {
+        return p.zoneId === zoneId;
+      }).length;
+      if (used) { headMsg("还有 " + used + " 个项目在这个分区里，先换区或删掉", true); return; }
+      var zn = zoneOf(zoneId);
+      if (!window.confirm("删除分区「" + (zn ? zn.name : zoneId) + "」？")) return;
+      ctx.deleteZone(zoneId).then(function (r) {
+        if (!r || !r.ok) { headMsg((r && r.message) || "删除失败", true); return; }
+        dlg.close();
+        ctx.reload();
+      });
+      return;
+    }
+    if (!pid) return;
+    var nameCell = row.querySelector(".zp-name");
+    if (act === "proj-rename") {
+      inlineEdit(nameCell, nameCell.textContent, function (name) {
+        ctx.renameProject(pid, name).then(afterWrite);
+      });
+    } else if (act === "proj-move") {
+      inlineMove(nameCell, pid, zoneId);
+    } else if (act === "proj-delete") {
+      if (!window.confirm("删除项目「" + nameCell.textContent + "」及其全部任务？")) return;
+      ctx.deleteProject(pid).then(afterWrite);
+    }
+  }
+
   function open(zoneId) {
     if (!ctx) return;
     if (!dlg) {
@@ -170,10 +299,13 @@
       // 点遮罩（dialog 自己，而不是里面的内容）= 关
       dlg.addEventListener("click", function (ev) {
         if (ev.target === dlg) { dlg.close(); return; }
+        var act = ev.target.closest("[data-zp-act]");
+        if (act) { ev.preventDefault(); onAct(act); return; }
         var row = ev.target.closest("[data-zp-open]");
         if (row) { dlg.close(); ctx.openProject(row.dataset.zpOpen); }
       });
       dlg.addEventListener("keydown", function (ev) {
+        if (ev.target.closest && ev.target.closest("[data-zp-act]")) return;
         var row = ev.target.closest && ev.target.closest("[data-zp-open]");
         if (row && (ev.key === "Enter" || ev.key === " ")) {
           ev.preventDefault(); dlg.close(); ctx.openProject(row.dataset.zpOpen);

@@ -742,24 +742,9 @@
     var refreshBtn = $("#hexRefresh");
     if (refreshBtn) refreshBtn.addEventListener("click", function () { refresh(); });
 
-    // 「经典列表」开关（只在 index.html 有）：蜂巢 ⇄ 旧 #zoneGrid 列表。
-    // 两边都是活的，只是同一时刻显示一个 —— 分区/项目那几条写路径目前只挂在
-    // 旧列表上，蜂巢还没接管，所以列表必须留着能切回去。
-    var toggle = $("#zoneViewToggle");
-    if (toggle) {
-      toggle.addEventListener("click", function () {
-        var grid = $("#zoneGrid"), wrap = $("#hiveWrap"), pager = $("#zonePager");
-        var toList = grid.hidden;                       // 当前列表是藏着的 → 这次是切去列表
-        grid.hidden = !toList;
-        if (wrap) wrap.hidden = toList;
-        if (pager) pager.hidden = !toList;
-        toggle.setAttribute("aria-pressed", String(toList));
-        toggle.textContent = toList ? "蜂巢视图" : "经典列表";
-        // 切回蜂巢：藏着的时候 getBoundingClientRect 全是 0，FLIP 会算出一堆
-        // 垃圾位移。所以复位时**不带动画**重算一次布局。
-        if (!toList) { clearHover(true); L.apply(false); }
-      });
-    }
+    // 「经典列表」开关连同旧 #zoneGrid 列表一起去掉（2026-09-14）。前提是先把
+    // 列表**独有**的写路径搬进蜂巢：分区改名/删分区、项目改名/换区/删项目现在
+    // 都在分区规划面板里（hex-zone-plan.js）。
   }
 
   function refresh(keepExpanded) {
@@ -788,7 +773,10 @@
     // 建完项目用这条：那一格的身份刚从"占位格"变成"某个项目"，展开态却挂在
     // 坐标键上，重建之后同一个键指向的可能已经是别的格子（分区重排、热度
     // 换位都会动坐标）。所以先收起再重拉，不试图"保持展开"。
-    collapseAndReload: function () { collapse(); return refresh(false); }
+    collapseAndReload: function () { collapse(); return refresh(false); },
+    // 从别的 tab 切回蜂巢时必须调一次：藏着的时候 getBoundingClientRect 全是 0，
+    // 不重算 FLIP 会拿这堆 0 去算位移，切回来整张图会飞一下。
+    relayout: function () { clearHover(true); L.apply(false); }
   };
 
   function boot() {
@@ -810,6 +798,11 @@
              onShortPress: function (zoneId) { ZP.open(zoneId); } });
     ZP.init({ state: state, fetchGantt: D.fetchGantt, createProject: D.createProject,
               halfLifeDays: H.HEAT_HALFLIFE_DAYS,
+              // 分区/项目的写路径（2026-09-14）：经典列表去掉之后，它独有的这几条
+              // 搬进分区规划面板。**原样递 data.js 的函数**，不在这儿包一层。
+              renameZone: D.renameZone, deleteZone: D.deleteZone,
+              renameProject: D.renameProject, moveProject: D.moveProject,
+              deleteProject: D.deleteProject,
               // 点面板里的一行 = 在蜂巢里展开那个项目（和点格子是同一条 expand）
               openProject: function (projectId) {
                 if (state.byId[projectId]) { clearHover(true); expand(projectId); }
@@ -851,8 +844,9 @@
                }, ANIM_MS);
              } });
     bind();
-    // 同一页里「经典列表」那半边写完会广播新的 tree（app.js 的 onTreeChange，
-    // crud.js 每次写完都调 App.refresh()）。蜂巢订上去就不用人自己按 F5 ——
+    // 同一页里另外几条写路径（顶栏「＋新建分区」、回顾里点开的编辑弹窗）写完会
+    // 广播新的 tree（app.js 的 onTreeChange，crud.js 每次写完都调 App.refresh()）。
+    // 蜂巢订上去就不用人自己按 F5 ——
     // 人类 2026-09-08：「新建分区后不会自动刷新出现新建的。」
     // ⚠️ 第一次回调是**补发当前值**（订阅即发），boot 自己马上要拉一次，
     // 不跳过就会连着打两次 views/tree。

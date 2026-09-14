@@ -329,44 +329,12 @@
     finishSubmit(dialog, D.deleteTask(dialog.dataset.taskId));
   }
 
-  // 完成态切换：弹窗外的一次性动作，见文件头注释 4。
-  function toggleTask(taskId, done) {
-    D.toggleTaskDone(taskId, done).then(function (result) {
-      if (!result.ok) showToast(result.message);
-      return App.refresh();
-    });
-  }
-
-  // F-TABLE-2：播放钮跳计时页并带任务预选，**不在本模块起表**——开始永远是
-  // 计时页上那一下，全站只有一个开始入口（PRD §4 行为规格原文）。根相对路径，
-  // 不管 table 自己挂在哪层前缀下都对。
-  function goToRing(taskId) {
-    window.location.href = "/ring/?task=" + encodeURIComponent(taskId);
-  }
-
-  // ── 事件委托：#zoneGrid 里所有交互元素都是渲染层打的 data-action ──
-  function handleGridClick(event) {
-    var target = event.target.closest && event.target.closest("[data-action]");
-    if (!target) return;
-    var action = target.getAttribute("data-action");
-    if (action === "edit-zone") openZoneDialog(target.getAttribute("data-zone-id"));
-    else if (action === "add-project") openProjectDialog(null, target.getAttribute("data-zone-id"));
-    else if (action === "edit-project") openProjectDialog(target.getAttribute("data-project-id"));
-    else if (action === "add-task") openTaskDialog(null, target.getAttribute("data-project-id"));
-    else if (action === "edit-task") openTaskDialog(target.getAttribute("data-task-id"));
-    else if (action === "go-task") goToRing(target.getAttribute("data-task-id"));
-  }
-
-  function handleGridChange(event) {
-    var target = event.target;
-    if (target.matches && target.matches('[data-action="toggle-task"]')) {
-      toggleTask(target.getAttribute("data-task-id"), target.checked);
-    }
-  }
-
+  // 2026-09-14：#zoneGrid 的事件委托（handleGridClick/handleGridChange）连同
+  // toggleTask / goToRing 一起删掉 —— 旧的「经典列表」整个去掉了，那几个
+  // data-action 现在没有任何 DOM 会打出来。三个 <dialog> 留着：回顾清单
+  // 「跳到对应对象」就是切回主视图再打开这两个既有弹窗（见文件尾的导出），
+  // 顶栏「＋新建分区」也还走 #zoneDialog。
   document.addEventListener("DOMContentLoaded", function () {
-    $("#zoneGrid").addEventListener("click", handleGridClick);
-    $("#zoneGrid").addEventListener("change", handleGridChange);
     $("#newZone").addEventListener("click", function () { openZoneDialog(null); });
 
     $("#zoneForm").addEventListener("submit", submitZoneForm);
