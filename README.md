@@ -47,6 +47,9 @@ python3 seed/seed_demo.py     # 可选：塞一批演示数据（做家务、做
 HONEYCOMB_BIND=0.0.0.0:8800 docker compose up -d
 ```
 
+> 反代在前面时注意：本项目的 nginx 配置里开了 `absolute_redirect off`，跳转用相对 Location。
+> 开着默认值的话，`http://IP:8800/` 的 302 会跳到 `http://IP/table/`（丢端口），看起来就是"自动跳转然后 502"。
+
 ⚠️ **v0.1 没有登录**。默认只绑回环地址（`127.0.0.1`），是单机自用的定位。
 要放到局域网或公网，请自己在前面加一层带认证的反向代理。
 
