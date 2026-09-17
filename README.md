@@ -1,77 +1,231 @@
-<div align="center">
-
 # HoneyComb
 
-把项目摊成一张蜂巢，中间那一格是正在走的表。
+An event-sourced kernel for time and task management. Zones → projects → tasks;
+the timing log is append-only, and every read endpoint is a projection.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-![no build step](https://img.shields.io/badge/frontend-no%20build%20step-brightgreen)
-![docker compose](https://img.shields.io/badge/run-docker%20compose%20up-blue)
-![FastAPI + MongoDB](https://img.shields.io/badge/api-FastAPI%20%2B%20MongoDB-informational)
+**Not** another to-do list. It records **where your time actually went**, not
+where you planned it to go.
 
-![鼠标扫过放大，长按开始计时](docs/hero.gif)
+中文版：[README.zh-CN.md](README.zh-CN.md)
 
-*鼠标扫过一格就放大，露出它的下一步；长按，那一格被吸进中间的圆环，表开始走。*
+---
 
-</div>
+## Thirty seconds to running
 
-## 功能
-
-- **蜂巢视图** —— 每个分区占圆周上一个扇区，扇区角度按项目数分。最近做得多的项目自动往中心坐，颜色也更浓。
-- **长按开始计时** —— 按住哪一格，时间就流进哪一格。中心圆环一圈 60 分钟，计时期间有粒子从圆环飘向那一格。
-- **只记发生过的事** —— 停表写一条只追加的 `session.completed` 事件。所有统计都是现算的投影，没有一个可以被偷偷改的数字。「取消不记录」真的一个字都不写。
-- **分区规划** —— 短按分区名：热度排行、近 7 天投入、接下来做什么；项目改名、换区、删除也在这里。
-- **每周回顾** —— 本周计划 vs 实际、过期项目、久未动的任务，点一条直接跳过去处理。
-- **零构建前端** —— 原生 JS，不装 node_modules，不配打包器，改完刷新就生效。
-
-## 快速开始
-
-```bash
-docker compose up -d          # mongo + api + web
-python3 seed/seed_demo.py     # 可选：一批演示数据
+```sh
+cd honeycomb
+cp .env.example .env
+# Edit .env and set a real HONEYCOMB_PASSWORD — there is no default,
+# and the stack refuses to start without one.
+docker compose up -d
 ```
 
-打开 <http://127.0.0.1:8800/>。
+Then open <http://127.0.0.1:8800/>.
 
-```bash
-python3 seed/seed_demo.py --big          # 大盘：10 分区 40 项目
-HONEYCOMB_BIND=0.0.0.0:8800 docker compose up -d   # 绑到局域网
-docker compose down                       # 停（数据留着）
+Needs Docker and Docker Compose. **Nothing else to install** — no `npm install`,
+no `pip install`.
+
+### A fresh install is an empty database
+
+Logging in gives you `{"zones":[],"projects":[]}` and nothing to look at. Fill it
+with made-up demo data:
+
+```sh
+read -rsp 'HoneyComb password: ' HONEYCOMB_PASSWORD && export HONEYCOMB_PASSWORD
+python3 seed/seed_demo.py
+python3 seed/seed_demo.py --big     # bigger set: 10 zones / 40 projects
 ```
 
-## 怎么用
+4 zones, 9 projects, 18 tasks, plus 14 days of backfilled timing sessions so the
+statistics and the timing archive have something in them. Standard library only,
+no dependencies. **Safe to run twice** — existing names are skipped and repeated
+backfills are deduplicated server-side (verified: three runs, the event count
+stays at 43).
 
-**点开一格** —— 展开成一张卡：下一步、全部待办、最近完成。点一条待办露出完成 / 改名 / 补登 / 删；点标题直接改项目名。
+`read -rsp` prompts without echoing and, unlike an inline assignment, keeps the
+password out of your shell history. The script reads it from the environment
+rather than a command-line flag, so it never shows up in `ps` output either.
 
-![点开一格](docs/expand.gif)
+### It binds to loopback only, on purpose
 
-**短按分区名** —— 打开分区规划：热度排行、近 7 天投入、接下来做什么、最近完成了什么。
+`.env.example` ships `HONEYCOMB_BIND=127.0.0.1:8800`. To expose it on a LAN or
+the internet:
 
-![分区规划](docs/zone.gif)
+- change `HONEYCOMB_BIND`
+- **put TLS in front of it** (Caddy, nginx, Traefik — your call)
+- don't expose port 80 directly
 
-其余手势：
+The login gate is single-password, and the cookie carries `Secure` by default,
+which means **browsers will not store it over plain HTTP**. For local HTTP
+debugging set `AUTH_COOKIE_SECURE=false` explicitly. Never set that on a public
+host.
 
-| 操作 | 结果 |
+---
+
+## How it fits together
+
+```
+modules/      The real code for each module. Every module is usable on its own
+              and depends on no other module.
+contracts/    Contracts. The only coupling point between modules.
+honeycomb/    The assembly layer. **Zero copies of code** — just compose +
+              nginx wiring modules into one site.
+install.sh    Reads contracts, resolves dependencies, generates compose + routes.
+```
+
+### Modules depend on contract IDs, never on each other
+
+This is the foundation of the whole structure. `nexus-core` does not know
+whether a frontend exists. A frontend does not know whether the login gate is a
+30-line stub or a full account system with its own database. They only know
+contract IDs and status codes.
+
+That is what makes "which modules do I need" computable:
+
+```sh
+./install.sh list              # modules, and what each provides / consumes
+./install.sh plan nexus-core   # show the resolution, write nothing
+./install.sh add  nexus-core   # resolve and generate compose/nginx
+./install.sh doctor            # check the installed set still matches the files
+```
+
+A missing dependency is resolved in this order: **a module provides it** → **a
+spec-only document exists** (the event envelope format, for instance) → **a stub
+implementation exists**. If none of the three is present it **fails hard and
+lists the missing IDs**.
+
+It never skips silently. An install with a dangling dependency is worse than one
+that fails, because it breaks in strange ways at runtime while you believe it
+succeeded.
+
+### Two compose files, different jobs
+
+| | Maintained by | When to use |
+|---|---|---|
+| `honeycomb/docker-compose.yml` | hand-written | The default assembly. **Runs out of the box, zero dependencies.** |
+| `honeycomb/generated/` | produced by `install.sh add` | When changing the module set |
+
+`install.sh doctor` compares the service sets of the two and warns on drift.
+
+`list` / `plan` / `doctor` have no third-party dependencies; only `add` needs
+`pyyaml` (it has to parse the nested structure of module manifests). **The
+default assembly does not use the installer at all**, so "clone it and run it"
+never depends on a `pip install`.
+
+---
+
+## What is in this release
+
+| | |
 |---|---|
-| 长按格子里的待办卡片 | 直接给这条已有任务计时 |
-| 鼠标停在中心格 | 出现 完成 / 暂停 / 取消不记录 |
-| 点中心格上半部分 | 进计时台 |
-| 长按分区名 | 编辑模式，拖着换分区方位 |
-| 长按蜂巢外的空白 | 在那个方向长出一格，新建项目 |
-| 双击分区名 | 恢复默认顺序 |
+| `modules/nexus-core` | The event-sourced kernel (FastAPI + MongoDB). Provides 11 contracts: timing, task CRUD, the event write entry point, and read projections for tree / ring / gantt / export. |
+| `contracts/yq-event.v1` | The event envelope spec. **The core contract of the whole system** — every write is an event posted into this envelope. |
+| `contracts/auth.gate.v1` | The login gate contract, a stub implementation (standard library only, zero dependencies), and a minimal login page. |
 
-## 结构
+**Not here yet**: the two frontend modules, the task hive (`/table/`) and the
+timer ring (`/ring/`). The assembly layer has commented-out locations reserved
+for them; uncomment once they land in `modules/`.
 
+---
+
+## The login gate is a door, not an account system
+
+The stub implementation of `contracts/auth.gate.v1` is a **single shared
+password**. It deliberately has **no** registration, no multi-user support, no
+password recovery, no permission tiers, and no third-party login.
+
+The reason for drawing the line there: an open-source release should not ship a
+real account system bolted on. If you need multi-user, replace that one
+implementation — as long as it still satisfies the same contract's four
+endpoints and three invariants, **the assembly layer needs no changes at all**.
+
+To write your own, read the "what a replacement must satisfy" section of
+`contracts/auth.gate.v1/contract.md`.
+
+---
+
+## Where the data lives
+
+A Mongo named volume, `honeycomb_mongo_data`.
+
+```sh
+docker compose down      # keeps data
+docker compose down -v   # deletes data too
 ```
-api/    FastAPI + MongoDB，事件流 + 投影
-web/    原生 JS 前端，浏览器直接跑
-nginx/  唯一入口：/table/ 蜂巢，/ring/ 计时台，/api/ 反代
-seed/   演示数据脚本（纯标准库）
-docs/   架构说明（ARCHITECTURE.md）、演示顺序（DEMO.md）
-```
 
-v0.1 默认只绑回环地址，单机自用。要放到局域网或公网，请自己在前面加一层带认证的反向代理。
+`modules/nexus-core/code/backend/scripts/` holds backup, restore, and
+orphan-event cleanup scripts. Backups **do not go into the code repository** —
+committing them makes the working tree permanently dirty after every backup.
 
-## 许可
+---
 
-MIT，见 [LICENSE](LICENSE)。
+## If you want to change something
+
+**Contract first.** For any behavior change with external consumers, edit
+`contract.md` before the code. Otherwise whatever a consumer wrote against the
+documentation breaks quietly on some later deploy.
+
+**Breaking changes get a new version number.** Do not edit v1 in place.
+`auth.gate.v1` is `auth.gate.v1`; changing a status code or an invariant means
+shipping `v2` alongside it.
+
+**A missing file on a critical path must fail loudly, never skip silently.** A
+missing optional part should print "skipped". The one thing that is never
+acceptable is skipping silently and then reporting success — a crash makes
+someone stop, a lie makes them believe it worked.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). This project uses **DCO**
+(`git commit -s`), not a CLA — your contribution comes in under AGPL-3.0 and
+stays AGPL-3.0. It will not be relicensed and sold under closed-source terms.
+
+## License
+
+**AGPL-3.0**, full text in [LICENSE](LICENSE).
+
+Self-hosting, personal use, and internal use inside an organization are
+completely free — no different from the GPL. **If you modify this code and
+provide it as a service over a network to others**, you must offer those users
+the complete corresponding source of your modified version
+([AGPL-3.0 §13](LICENSE)). That clause is the only substantive difference from
+the GPL, and it is the reason for choosing it. Using it yourself, or internally
+without offering a service to others, does not trigger it.
+
+Trademarks are not covered — which is simply how the AGPL works and needs no
+extra declaration: a code license and a trademark license are two different
+things, and having the first is not having the second.
+
+> The AGPL-3.0 text in `LICENSE` is the official English version. The FSF does
+> not authorize translations as legally valid, so **do not add a translated
+> `LICENSE`** — an unofficial translation may be useful to read, but it must not
+> replace or sit beside the English text as if it were equally binding.
+
+### About v0.1 and MIT
+
+**v0.1 (2026-09-14) was released under the MIT license, and that grant is
+irrevocable for anyone who obtained a copy at the time.** Relicensing only
+applies to later versions; it cannot pull back what has already been
+distributed. The v0.1 snapshot stays on the `v0.1` branch under MIT terms.
+
+This is written down because the question comes up repeatedly and the answer is
+settled.
+
+### Licenses of dependencies
+
+Runtime dependencies are not distributed with this repository and carry their
+own licenses: FastAPI (MIT), Uvicorn (BSD-3-Clause), Pydantic (MIT), PyMongo
+(Apache-2.0), pytest (MIT), HTTPX (BSD-3-Clause).
+
+This repository **vendors no third-party source code**. The frontend under
+`contracts/auth.gate.v1/stub/web/` is hand-written, with zero dependencies and
+no framework.
+
+**MongoDB's SSPL deserves a separate look.** It is not an OSI-approved open
+source license, and what it constrains is *offering MongoDB itself as a service
+to third parties*. This project merely connects to a MongoDB instance; it
+neither distributes nor resells it, so the constraint does not apply. But if you
+intend to package HoneyComb as a SaaS product, go read the SSPL yourself — that
+is between you and MongoDB, and has nothing to do with this project's AGPL.
