@@ -15,10 +15,11 @@ jobs:
         image: mongo:7
         ports: ['27017:27017']
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand(1)'"
+          --health-cmd "mongosh --quiet --eval 'db.hello().ok'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --health-start-period 20s
     defaults:
       run:
         working-directory: modules/nexus-core/code/backend
@@ -54,4 +55,6 @@ jobs:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: false
